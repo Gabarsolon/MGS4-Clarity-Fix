@@ -1,0 +1,16 @@
+# backups the tools create next to the game's config files
+*.bak
+
+# decrypted config dumps
+*.txt
+!README*.txt
+
+# python
+__pycache__/
+*.py[cod]
+
+# never ship a built binary from this repo -- see README
+build/
+dist/
+*.spec
+*.exe
