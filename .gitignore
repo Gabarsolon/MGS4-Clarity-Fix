@@ -14,3 +14,6 @@ build/
 dist/
 *.spec
 *.exe
+
+# release archives live on the Releases page, not in git
+*.zip
