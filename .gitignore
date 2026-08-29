@@ -17,3 +17,6 @@ dist/
 
 # release archives live on the Releases page, not in git
 *.zip
+
+# staging folder for the Nexus upload (derived content)
+upload/
