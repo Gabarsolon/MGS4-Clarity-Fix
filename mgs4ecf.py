@@ -37,10 +37,21 @@ def backup_once(path: Path) -> None:
         print(f'  backed up -> {bak.name}')
 
 
+def app_dir() -> Path:
+    """Directory the user actually launched us from.
+
+    Under PyInstaller, __file__ points inside the temporary _MEIxxxx extraction
+    directory, not next to the .exe -- so a frozen build that trusts __file__ can
+    never find a game sitting beside it. sys.executable is the real location.
+    """
+    if getattr(sys, 'frozen', False):
+        return Path(sys.executable).resolve().parent
+    return Path(__file__).resolve().parent
+
+
 def find_config(hint=None):
     roots = [Path(hint)] if hint else []
-    roots += [Path.cwd(), Path(__file__).resolve().parent,
-              Path(__file__).resolve().parent.parent]
+    roots += [Path.cwd(), app_dir(), app_dir().parent]
     for r in roots:
         for c in (r / 'config', r / 'MGS4' / 'config'):
             if (c / 'mgs4.ecf').exists():
@@ -123,10 +134,31 @@ def cmd_restore(cfg: Path, saves: Path) -> None:
           else '  nothing to restore - no .bak files found.\n')
 
 
+def cmd_interactive(cfg: Path, saves: Path, width: int, height: int, aniso: int,
+                    shadow: int) -> None:
+    cmd_show(cfg)
+    print('  [1] Apply clarity settings (dynamic res off, FXAA off, 16x AF)')
+    print('  [2] Apply, but keep FXAA on')
+    print('  [3] Restore stock settings')
+    print('  [0] Exit\n')
+    choice = input('Choose: ').strip()
+    if choice == '1':
+        cmd_apply(cfg, saves, width, height, aniso, shadow, False)
+    elif choice == '2':
+        cmd_apply(cfg, saves, width, height, aniso, shadow, True)
+    elif choice == '3':
+        cmd_restore(cfg, saves)
+    elif choice == '0':
+        print('Nothing changed.')
+    else:
+        print('Not an option. Nothing changed.')
+
+
 def main() -> int:
     ap = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     ap.add_argument('--game-dir')
     ap.add_argument('--apply', action='store_true')
+    ap.add_argument('--interactive', action='store_true')
     ap.add_argument('--restore', action='store_true')
     ap.add_argument('--decrypt', metavar='FILE')
     ap.add_argument('--encrypt', metavar='FILE')
@@ -153,11 +185,19 @@ def main() -> int:
             print(f'{flag}ed -> {out}')
             return 0
 
+    # A frozen build launched by double-click gets no arguments, and a bare settings
+    # dump in a window that closes instantly is useless. Default it to the menu.
+    interactive = args.interactive or (
+        getattr(sys, 'frozen', False)
+        and not (args.apply or args.restore or args.game_dir))
+
     cfg = find_config(args.game_dir)
     if not cfg:
         print("Couldn't find MGS4/config/mgs4.ecf.\n"
-              "Run this from your MGS4 install folder, or pass --game-dir <path>.",
-              file=sys.stderr)
+              "Put this next to the game, run it from the MGS4 install folder, "
+              "or pass --game-dir <path>.", file=sys.stderr)
+        if interactive:
+            input('\nPress Enter to close: ')
         return 1
     print(f'config: {cfg}')
     saves = cfg.parent.parent / 'mgs4_savedata_win'
@@ -167,8 +207,14 @@ def main() -> int:
     elif args.apply:
         cmd_apply(cfg, saves, args.buffer_width, args.buffer_height,
                   args.aniso, args.shadow_buffer, args.keep_fxaa)
+    elif interactive:
+        cmd_interactive(cfg, saves, args.buffer_width, args.buffer_height,
+                        args.aniso, args.shadow_buffer)
     else:
         cmd_show(cfg)
+
+    if interactive:
+        input('\nPress Enter to close: ')
     return 0
 
 

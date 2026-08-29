@@ -102,24 +102,32 @@ Leave the `MaxAniso=1` entries on `TG_UI` and `TG_NoMip` alone.
 
 ## Using the script
 
-`mgs4ecf.ps1` needs no install. Tested on Windows PowerShell 5.1 and PowerShell 7.6.5.
+Nothing to install. Unzip into your MGS4 folder — the one containing `MGS4\` and
+`mgs4_savedata_win\` — and **double-click `Run-MGS4-Clarity-Fix.bat`**. It prints your
+current settings and offers apply / apply-but-keep-FXAA / restore.
+
+The `.bat` is a four-line wrapper around `mgs4ecf.ps1`. It passes
+`-ExecutionPolicy Bypass`, which applies to that one process only — it changes nothing
+system-wide and needs no admin rights.
+
+There is deliberately **no `.exe`**. Everything here is a few hundred lines of readable
+script, and you should be able to see what a tool does before pointing it at your game
+files. It also avoids the antivirus false positives that bundled Python executables
+reliably attract.
+
+If you'd rather drive it directly:
 
 ```powershell
-# GitHub marks downloaded files; clear that first or PowerShell refuses to run it
-Unblock-File .\mgs4ecf.ps1
+# GitHub marks downloaded files; clear that first or PowerShell refuses to run them
+Get-ChildItem . -Recurse | Unblock-File
 
-# see what you currently have
-.\mgs4ecf.ps1 -Show -GameDir "D:\Games\METAL GEAR SOLID 4 ..."
-
-# apply the three changes above
-.\mgs4ecf.ps1 -Apply -GameDir "D:\Games\METAL GEAR SOLID 4 ..."
-
-# put everything back
-.\mgs4ecf.ps1 -Restore -GameDir "D:\Games\METAL GEAR SOLID 4 ..."
+.\mgs4ecf.ps1 -Show     -GameDir "D:\Games\METAL GEAR SOLID 4 ..."
+.\mgs4ecf.ps1 -Apply    -GameDir "D:\Games\METAL GEAR SOLID 4 ..."
+.\mgs4ecf.ps1 -Restore  -GameDir "D:\Games\METAL GEAR SOLID 4 ..."
 ```
 
-Drop the `-GameDir` if you run it from inside the game folder. If your policy blocks
-scripts, prefix with `powershell -ExecutionPolicy Bypass -File .\mgs4ecf.ps1`.
+Drop `-GameDir` when running from inside the game folder. Tested on Windows
+PowerShell 5.1 and PowerShell 7.6.5.
 
 It writes a `.bak` next to each file before the first change and never overwrites an
 existing one, so `-Restore` always returns you to stock. If there's nothing to restore
@@ -128,7 +136,8 @@ it says so rather than claiming success.
 Useful flags: `-KeepFxaa` to leave anti-aliasing on, `-Aniso`, `-ShadowBuffer`, and
 `-BufferWidth`/`-BufferHeight` if you want to *raise* the render target above 4K.
 
-There's a Python equivalent, `mgs4ecf.py`, for Steam Deck and Linux.
+On Steam Deck or Linux, use `mgs4ecf.py` instead — same behaviour, standard library
+only: `python3 mgs4ecf.py --interactive`.
 
 ## Doing it by hand
 

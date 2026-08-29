@@ -25,6 +25,7 @@ param(
     [Parameter(ParameterSetName = 'Encrypt', Mandatory)][string]$Encrypt,
     [Parameter(ParameterSetName = 'Apply',   Mandatory)][switch]$Apply,
     [Parameter(ParameterSetName = 'Restore', Mandatory)][switch]$Restore,
+    [Parameter(ParameterSetName = 'Interactive', Mandatory)][switch]$Interactive,
     [Parameter(ParameterSetName = 'Show')][switch]$Show,
 
     [string]$Out,
@@ -91,6 +92,88 @@ function Resolve-ConfigDir {
     return $null
 }
 
+function Show-Settings {
+    param([string]$Cfg, [string]$SaveRoot)
+    $t = Read-Ecf (Join-Path $Cfg 'mgs4.ecf')
+    Write-Host "`nmgs4.ecf" -ForegroundColor Cyan
+    foreach ($k in 'dynamicResolution', 'bufferSizeX', 'bufferSizeY', 'windowSizeX', 'windowSizeY', 'vsync', 'fxaa', 'api') {
+        $m = [regex]::Match($t, "(?m)^\s*$k\s*=\s*(\S+)")
+        if ($m.Success) { Write-Host ('  {0,-20} {1}' -f $k, $m.Groups[1].Value) }
+    }
+    $scal = Join-Path $Cfg 'mgs4.scalability_PC.ecf'
+    if (Test-Path -LiteralPath $scal) {
+        $s = Read-Ecf $scal
+        $an = [regex]::Matches($s, 'MaxAniso=(\d+)') | ForEach-Object { $_.Groups[1].Value }
+        $sh = [regex]::Matches($s, 'ShadowBufferSize=(\d+)') | ForEach-Object { $_.Groups[1].Value }
+        Write-Host "`nmgs4.scalability_PC.ecf" -ForegroundColor Cyan
+        Write-Host ('  {0,-20} {1}' -f 'MaxAniso (all tiers)', (($an | Select-Object -Unique) -join ' '))
+        Write-Host ('  {0,-20} {1}' -f 'ShadowBufferSize', ($sh -join ' '))
+    }
+    foreach ($sf in @(Get-ChildItem -LiteralPath $SaveRoot -Filter 'mgs4.savedsettings' -Recurse -ErrorAction SilentlyContinue)) {
+        Write-Host "`n$($sf.FullName)" -ForegroundColor Cyan
+        Get-Content -LiteralPath $sf.FullName | ForEach-Object { Write-Host "  $_" }
+    }
+    Write-Host ''
+}
+
+function Invoke-Restore {
+    param([string]$Cfg, [string]$SaveRoot)
+    $n = 0
+    foreach ($f in @((Join-Path $Cfg 'mgs4.ecf'), (Join-Path $Cfg 'mgs4.scalability_PC.ecf'))) {
+        if (Test-Path -LiteralPath "$f.bak") {
+            Copy-Item -LiteralPath "$f.bak" -Destination $f -Force
+            Write-Host "  restored $(Split-Path $f -Leaf)" -ForegroundColor Green
+            $n++
+        }
+    }
+    foreach ($b in @(Get-ChildItem -LiteralPath $SaveRoot -Filter 'mgs4.savedsettings.bak' -Recurse -ErrorAction SilentlyContinue)) {
+        Copy-Item -LiteralPath $b.FullName -Destination ($b.FullName -replace '\.bak$', '') -Force
+        Write-Host "  restored mgs4.savedsettings" -ForegroundColor Green
+        $n++
+    }
+    if ($n -eq 0) { Write-Host "  nothing to restore - no .bak files found." -ForegroundColor Yellow }
+    else { Write-Host "`nRestored $n file(s) to stock." -ForegroundColor Green }
+}
+
+function Invoke-Apply {
+    param([string]$Cfg, [string]$SaveRoot, [int]$W, [int]$H, [int]$An, [int]$Sh, [bool]$Keep)
+    Write-Host "`nApplying..." -ForegroundColor Cyan
+    $main = Join-Path $Cfg 'mgs4.ecf'
+    Backup-Once $main
+    $t = Read-Ecf $main
+    $t = [regex]::Replace($t, '(?m)^(\s*dynamicResolution\s*=\s*)\w+', '${1}false')
+    $t = [regex]::Replace($t, '(?m)^(\s*bufferSizeX\s*=\s*)\d+', "`${1}$W")
+    $t = [regex]::Replace($t, '(?m)^(\s*bufferSizeY\s*=\s*)\d+', "`${1}$H")
+    if (-not $Keep) { $t = [regex]::Replace($t, '(?m)^(\s*fxaa\s*=\s*)true', '${1}false') }
+    Write-Ecf $main $t
+    $fx = if ($Keep) { '' } else { ', fxaa=false' }
+    Write-Host "  mgs4.ecf: dynamicResolution=false, buffer=${W}x${H}$fx" -ForegroundColor Green
+
+    $scal = Join-Path $Cfg 'mgs4.scalability_PC.ecf'
+    if (Test-Path -LiteralPath $scal) {
+        Backup-Once $scal
+        $s = Read-Ecf $scal
+        # Only touch the "Highest" tier (@3). Tiers 0-2 are the low-spec / Steam Deck ladder;
+        # raising their aniso costs performance on exactly the machines that can't spare it.
+        $s = [regex]::Replace($s, '(?s)\[TextureGroup@3\][^\[]*', {
+            param($m) [regex]::Replace($m.Value, 'MaxAniso=(?!1\b)\d+', "MaxAniso=$An") })
+        $s = [regex]::Replace($s, '(?m)^(\s*ShadowBufferSize\s*=\s*)2048', "`${1}$Sh")
+        Write-Ecf $scal $s
+        Write-Host "  mgs4.scalability_PC.ecf: MaxAniso=$An (Highest tier), ShadowBufferSize=$Sh" -ForegroundColor Green
+    }
+
+    if (-not $Keep) {
+        foreach ($sf in @(Get-ChildItem -LiteralPath $SaveRoot -Filter 'mgs4.savedsettings' -Recurse -ErrorAction SilentlyContinue)) {
+            Backup-Once $sf.FullName
+            $c = [System.IO.File]::ReadAllText($sf.FullName)
+            $c = [regex]::Replace($c, '(?m)^(enableFXAA=)\w+', '${1}false')
+            [System.IO.File]::WriteAllText($sf.FullName, $c)
+            Write-Host "  mgs4.savedsettings: enableFXAA=false" -ForegroundColor Green
+        }
+    }
+    Write-Host "`nDone. Run with -Restore to undo.`n" -ForegroundColor Green
+}
+
 # ------------------------------------------------------------------ decrypt / encrypt
 if ($PSCmdlet.ParameterSetName -eq 'Decrypt') {
     if (-not (Test-Path -LiteralPath $Decrypt)) { throw "No such file: $Decrypt" }
@@ -114,88 +197,32 @@ $cfg = Resolve-ConfigDir $GameDir
 if (-not $cfg) {
     Write-Host "Couldn't find MGS4\config\mgs4.ecf." -ForegroundColor Red
     Write-Host "Run this from your MGS4 install folder, or pass -GameDir '<path>'."
+    if ($Interactive) { Write-Host ''; Read-Host 'Press Enter to close' | Out-Null }
     exit 1
 }
-$mainEcf  = Join-Path $cfg 'mgs4.ecf'
-$scalEcf  = Join-Path $cfg 'mgs4.scalability_PC.ecf'
 $gameRoot = Split-Path (Split-Path $cfg -Parent) -Parent
 $saveRoot = Join-Path $gameRoot 'mgs4_savedata_win'
 Write-Host "config: $cfg" -ForegroundColor DarkGray
 
-if ($PSCmdlet.ParameterSetName -eq 'Show') {
-    $t = Read-Ecf $mainEcf
-    Write-Host "`nmgs4.ecf" -ForegroundColor Cyan
-    foreach ($k in 'dynamicResolution', 'bufferSizeX', 'bufferSizeY', 'windowSizeX', 'windowSizeY', 'vsync', 'fxaa', 'api') {
-        $m = [regex]::Match($t, "(?m)^\s*$k\s*=\s*(\S+)")
-        if ($m.Success) { Write-Host ('  {0,-20} {1}' -f $k, $m.Groups[1].Value) }
-    }
-    if (Test-Path -LiteralPath $scalEcf) {
-        $s = Read-Ecf $scalEcf
-        $an = [regex]::Matches($s, 'MaxAniso=(\d+)') | ForEach-Object { $_.Groups[1].Value }
-        $sh = [regex]::Matches($s, 'ShadowBufferSize=(\d+)') | ForEach-Object { $_.Groups[1].Value }
-        Write-Host "`nmgs4.scalability_PC.ecf" -ForegroundColor Cyan
-        Write-Host ('  {0,-20} {1}' -f 'MaxAniso (all tiers)', (($an | Select-Object -Unique) -join ' '))
-        Write-Host ('  {0,-20} {1}' -f 'ShadowBufferSize', ($sh -join ' '))
-    }
-    foreach ($sf in @(Get-ChildItem -LiteralPath $saveRoot -Filter 'mgs4.savedsettings' -Recurse -ErrorAction SilentlyContinue)) {
-        Write-Host "`n$($sf.FullName)" -ForegroundColor Cyan
-        Get-Content -LiteralPath $sf.FullName | ForEach-Object { Write-Host "  $_" }
-    }
-    Write-Host ''
-    return
-}
-
-if ($PSCmdlet.ParameterSetName -eq 'Restore') {
-    $n = 0
-    foreach ($f in @($mainEcf, $scalEcf)) {
-        if (Test-Path -LiteralPath "$f.bak") {
-            Copy-Item -LiteralPath "$f.bak" -Destination $f -Force
-            Write-Host "  restored $(Split-Path $f -Leaf)" -ForegroundColor Green
-            $n++
+switch ($PSCmdlet.ParameterSetName) {
+    'Show'    { Show-Settings $cfg $saveRoot }
+    'Restore' { Invoke-Restore $cfg $saveRoot }
+    'Apply'   { Invoke-Apply $cfg $saveRoot $BufferWidth $BufferHeight $Aniso $ShadowBuffer $KeepFxaa.IsPresent }
+    'Interactive' {
+        Show-Settings $cfg $saveRoot
+        Write-Host '  [1] Apply clarity settings (dynamic res off, FXAA off, 16x AF)'
+        Write-Host '  [2] Apply, but keep FXAA on'
+        Write-Host '  [3] Restore stock settings'
+        Write-Host '  [0] Exit'
+        Write-Host ''
+        switch ((Read-Host 'Choose')) {
+            '1' { Invoke-Apply $cfg $saveRoot $BufferWidth $BufferHeight $Aniso $ShadowBuffer $false }
+            '2' { Invoke-Apply $cfg $saveRoot $BufferWidth $BufferHeight $Aniso $ShadowBuffer $true }
+            '3' { Invoke-Restore $cfg $saveRoot }
+            '0' { Write-Host 'Nothing changed.' }
+            default { Write-Host 'Not an option. Nothing changed.' -ForegroundColor Yellow }
         }
-    }
-    foreach ($b in @(Get-ChildItem -LiteralPath $saveRoot -Filter 'mgs4.savedsettings.bak' -Recurse -ErrorAction SilentlyContinue)) {
-        Copy-Item -LiteralPath $b.FullName -Destination ($b.FullName -replace '\.bak$', '') -Force
-        Write-Host "  restored mgs4.savedsettings" -ForegroundColor Green
-        $n++
-    }
-    if ($n -eq 0) { Write-Host "  nothing to restore - no .bak files found." -ForegroundColor Yellow }
-    else { Write-Host "`nRestored $n file(s) to stock." -ForegroundColor Green }
-    return
-}
-
-# ------------------------------------------------------------------ apply
-Write-Host "`nApplying..." -ForegroundColor Cyan
-Backup-Once $mainEcf
-$t = Read-Ecf $mainEcf
-$t = [regex]::Replace($t, '(?m)^(\s*dynamicResolution\s*=\s*)\w+', '${1}false')
-$t = [regex]::Replace($t, '(?m)^(\s*bufferSizeX\s*=\s*)\d+', "`${1}$BufferWidth")
-$t = [regex]::Replace($t, '(?m)^(\s*bufferSizeY\s*=\s*)\d+', "`${1}$BufferHeight")
-if (-not $KeepFxaa) { $t = [regex]::Replace($t, '(?m)^(\s*fxaa\s*=\s*)true', '${1}false') }
-Write-Ecf $mainEcf $t
-$fx = if ($KeepFxaa) { '' } else { ', fxaa=false' }
-Write-Host "  mgs4.ecf: dynamicResolution=false, buffer=${BufferWidth}x${BufferHeight}$fx" -ForegroundColor Green
-
-if (Test-Path -LiteralPath $scalEcf) {
-    Backup-Once $scalEcf
-    $s = Read-Ecf $scalEcf
-    # Only touch the "Highest" tier (@3). Tiers 0-2 are the low-spec / Steam Deck ladder;
-    # raising their aniso costs performance on exactly the machines that can't spare it.
-    $s = [regex]::Replace($s, '(?s)\[TextureGroup@3\][^\[]*', {
-        param($m) [regex]::Replace($m.Value, 'MaxAniso=(?!1\b)\d+', "MaxAniso=$Aniso") })
-    $s = [regex]::Replace($s, '(?m)^(\s*ShadowBufferSize\s*=\s*)2048', "`${1}$ShadowBuffer")
-    Write-Ecf $scalEcf $s
-    Write-Host "  mgs4.scalability_PC.ecf: MaxAniso=$Aniso (Highest tier), ShadowBufferSize=$ShadowBuffer" -ForegroundColor Green
-}
-
-if (-not $KeepFxaa) {
-    foreach ($sf in @(Get-ChildItem -LiteralPath $saveRoot -Filter 'mgs4.savedsettings' -Recurse -ErrorAction SilentlyContinue)) {
-        Backup-Once $sf.FullName
-        $c = [System.IO.File]::ReadAllText($sf.FullName)
-        $c = [regex]::Replace($c, '(?m)^(enableFXAA=)\w+', '${1}false')
-        [System.IO.File]::WriteAllText($sf.FullName, $c)
-        Write-Host "  mgs4.savedsettings: enableFXAA=false" -ForegroundColor Green
+        Write-Host ''
+        Read-Host 'Press Enter to close' | Out-Null
     }
 }
-
-Write-Host "`nDone. Run with -Restore to undo.`n" -ForegroundColor Green
