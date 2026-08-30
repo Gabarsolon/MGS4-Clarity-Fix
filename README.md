@@ -3,8 +3,8 @@
 Metal Gear Solid 4 in *Master Collection Vol. 2* keeps its engine settings in
 `MGS4\config\*.ecf`. Those files are plain INI text run through a simple XOR, so you
 can't edit them in Notepad. This repo documents the format, explains which settings
-actually affect image quality, and ships a small PowerShell script that converts the
-files to text and back.
+actually affect image quality, and ships a small script — PowerShell on Windows, plain
+Python everywhere else — that converts the files to text and back.
 
 You do not need the script. The whole thing is one XOR — [everything it does is
 documented below](#doing-it-by-hand) so you can do it by hand or write your own.
@@ -64,6 +64,13 @@ Setting `bufferSize` to "match your monitor" **throws that away**. It looks like
 FXAA off you end up at native res with no anti-aliasing at all, which aliases and
 shimmers worse than stock. Leave it at 3840×2160, or raise it if you have headroom.
 
+**`windowSizeX`/`windowSizeY` has to move with it.** Stock keeps these equal to
+`bufferSizeX`/`bufferSizeY` (both 3840×2160) — `windowSize` is the actual swapchain the
+game presents through, so if you raise or lower the buffer without moving the window to
+match, the output stays capped at whatever the window still says and nothing visibly
+changes. This tripped up more than one person editing the buffer by hand and getting no
+result. `-Apply`/`-BufferWidth`/`-BufferHeight` now move both together automatically.
+
 ---
 
 ## What to change
@@ -86,34 +93,97 @@ Only touch `[TextureGroup@3]`. Tiers `@0`–`@2` are the low-spec and Steam Deck
 raising anisotropy there costs performance on the machines least able to afford it.
 Leave the `MaxAniso=1` entries on `TG_UI` and `TG_NoMip` alone.
 
+### For weak or low-end hardware
+
+Everything above assumes you have GPU headroom to spend. If you don't — if the game
+already sits at a low resolution and still dips into the 20s — do the opposite of
+"turn dynamic resolution off": **keep it on** and lower the ceiling it scales from
+instead. `dynamicResolution` is the frame-budget scaler described above; on hardware
+that's actually missing budget, it's the thing keeping the game playable, not the thing
+making it soft.
+
+```
+.\mgs4ecf.ps1 -Apply -KeepDynamicRes -BufferWidth 1280 -BufferHeight 720
+python3 mgs4ecf.py --apply --keep-dynamic-res --buffer-width 1280 --buffer-height 720
+```
+
+This lowers `bufferSize`/`windowSize` to 720p (or lower — there's no floor enforced by
+the script; try 960×540 if 720p still isn't enough) while leaving `dynamicResolution =
+true`, so the engine can still shrink the viewport further under load instead of being
+locked to a single resolution that occasionally can't keep up. **I could not verify**
+what floor the scaler itself enforces below a given buffer size — that logic lives in
+the binary and I haven't reverse-engineered it — so results below 720p are untested;
+try it and see.
+
 ### Things I could not verify
 
 - `ShadowSampleCount` — stock is `7` at the highest tier. Raising it is plausible but
   the value may index a fixed kernel table in the binary. Untested; left alone.
 - `enablePSOCache` — ships `false`. Turning it on *sounds* like a stutter fix, but
   Konami shipping it off is weak evidence it's incomplete in this build.
-- `config\mgs4.user.ini` — the executable contains this path string alongside
-  `config\mgs4.ini`, `config\mgs4.steam.ini` and `config\mgs4.input.ini`, which
-  suggests a plaintext override mechanism that would make this whole repo unnecessary.
-  **Do not** create `config\mgs4.ini`: a stub there appears to shadow the full
-  `mgs4.ecf`, and the game fails to start. `mgs4.user.ini` alone is untested.
+
+---
+
+## A simpler alternative: `mgs4.user.ini`
+
+Credit where it's due: IKobi, in the comments on this mod's Nexus page, found that
+dropping a plain-text `mgs4.user.ini` into `MGS4\config\` overrides the encrypted
+configs — no decrypt/re-encrypt round trip at all. I checked it against the
+binary and it's real: `mgs4.exe` loads `config\mgs4.user.ini` *first*, ahead of
+`mgs4.ini`, `mgs4.steam.ini` and `mgs4.input.ini`, and it registers a specific set of
+overridable `[render]` keys. The full list I could find in the binary:
+
+```
+dynamicResolution, fxaa, fxaaParam, vsync, fullscreen, bufferSizeX, bufferSizeY,
+windowSizeX, windowSizeY, backbufferCount, api, enablePSOCache, hardware_occlusion,
+fxaa_SteamDeck, fxaa_XBS_X, fxaa_XBS_S, fxaa_PS5, fxaa_Switch_Docked, fxaa_Switch_Handheld
+```
+
+So for just the `[render]` settings, this works and needs nothing but a text editor:
+
+```ini
+[render]
+dynamicResolution = false
+fxaa = false
+bufferSizeX = 3840
+bufferSizeY = 2160
+windowSizeX = 3840
+windowSizeY = 2160
+```
+
+**It does not cover `MaxAniso` or `ShadowBufferSize`.** Those live in
+`mgs4.scalability_PC.ecf`'s per-tier `[TextureGroup@n]`/`[Shadow@n]` blocks, and the
+only related override I found is `scalability.scalabilityLevel_PC` — which picks a
+*tier* (0–3), not an individual value. There's no dotted key for `MaxAniso` or
+`ShadowBufferSize` themselves, so raising anisotropy or shadow resolution past what
+tier 3 already ships with still needs this repo's `.ecf` editor.
+
+**Still do not** create `config\mgs4.ini`: a stub there appears to shadow the full
+`mgs4.ecf` and the game fails to start. `mgs4.user.ini` is the one that's safe.
 
 ---
 
 ## Using the script
 
 Nothing to install. Unzip into your MGS4 folder — the one containing `MGS4\` and
-`mgs4_savedata_win\` — and **double-click `Run-MGS4-Clarity-Fix.bat`**. It prints your
-current settings and offers apply / apply-but-keep-FXAA / restore.
+`mgs4_savedata_win\`.
 
-The `.bat` is a four-line wrapper around `mgs4ecf.ps1`. It passes
-`-ExecutionPolicy Bypass`, which applies to that one process only — it changes nothing
-system-wide and needs no admin rights.
+**Windows:** double-click `Run-MGS4-Clarity-Fix.bat`. The `.bat` is a four-line
+wrapper around `mgs4ecf.ps1`. It passes `-ExecutionPolicy Bypass`, which applies to
+that one process only — it changes nothing system-wide and needs no admin rights.
 
-There is deliberately **no `.exe`**. Everything here is a few hundred lines of readable
-script, and you should be able to see what a tool does before pointing it at your game
-files. It also avoids the antivirus false positives that bundled Python executables
-reliably attract.
+**Steam Deck / Linux / macOS:** run `./run-mgs4-clarity-fix.sh` from the game folder
+(`chmod +x` it first if the zip didn't preserve the bit). It's a four-line wrapper
+around `mgs4ecf.py`, standard library only, Python 3.7+ — no PowerShell needed on
+either side.
+
+Either way you get the same menu: apply / apply-but-keep-FXAA / apply-but-keep-dynamic-
+resolution / restore.
+
+There is deliberately **no `.exe`** on any platform. Everything here is a few hundred
+lines of readable script, and you should be able to see what a tool does before
+pointing it at your game files. It also avoids the antivirus false positives that
+bundled Python executables reliably attract.
 
 If you'd rather drive it directly:
 
@@ -126,18 +196,25 @@ Get-ChildItem . -Recurse | Unblock-File
 .\mgs4ecf.ps1 -Restore  -GameDir "D:\Games\METAL GEAR SOLID 4 ..."
 ```
 
-Drop `-GameDir` when running from inside the game folder. Tested on Windows
-PowerShell 5.1 and PowerShell 7.6.5.
+```sh
+python3 mgs4ecf.py --game-dir "/path/to/MGS4 ..." --apply
+python3 mgs4ecf.py --game-dir "/path/to/MGS4 ..." --restore
+```
+
+Drop `-GameDir`/`--game-dir` when running from inside the game folder. Tested on
+Windows PowerShell 5.1 and PowerShell 7.6.5.
 
 It writes a `.bak` next to each file before the first change and never overwrites an
-existing one, so `-Restore` always returns you to stock. If there's nothing to restore
-it says so rather than claiming success.
+existing one, so `-Restore`/`--restore` always returns you to stock. If there's nothing
+to restore it says so rather than claiming success.
 
-Useful flags: `-KeepFxaa` to leave anti-aliasing on, `-Aniso`, `-ShadowBuffer`, and
-`-BufferWidth`/`-BufferHeight` if you want to *raise* the render target above 4K.
-
-On Steam Deck or Linux, use `mgs4ecf.py` instead — same behaviour, standard library
-only: `python3 mgs4ecf.py --interactive`.
+Useful flags: `-KeepFxaa`/`--keep-fxaa` to leave anti-aliasing on,
+`-KeepDynamicRes`/`--keep-dynamic-res` to leave the frame-budget scaler on (see
+[weak hardware](#for-weak-or-low-end-hardware) above), `-Aniso`/`--aniso`,
+`-ShadowBuffer`/`--shadow-buffer`, and `-BufferWidth`/`-BufferHeight`
+(`--buffer-width`/`--buffer-height`) to move the render target — up for more
+supersampling, down for more headroom. `windowSize` now always follows the buffer
+automatically, since stock keeps the two equal and the game presents through the window.
 
 ## Doing it by hand
 
@@ -179,6 +256,7 @@ hooking each of those, which is what MGSFPSUnlock does.
 
 The blur symptoms and the 1024×768 detail come from
 [r/metalgearsolid](https://www.reddit.com/r/metalgearsolid/) threads following the
-Vol. 2 PC release. Framerate work is cipherxof's.
+Vol. 2 PC release. Framerate work is cipherxof's. The `mgs4.user.ini` override is
+IKobi's find, from the comments on this mod's Nexus page.
 
 MIT licensed.

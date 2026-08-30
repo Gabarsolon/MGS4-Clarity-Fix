@@ -51,10 +51,20 @@ machines that can least afford it.
 
 Unzip into your MGS4 folder — the one containing [i]MGS4\[/i] and
 [i]mgs4_savedata_win\[/i] — and double-click [b]Run-MGS4-Clarity-Fix.bat[/b]. It
-prints your current settings, then offers apply / apply-but-keep-FXAA / restore.
+prints your current settings, then offers apply / apply-but-keep-FXAA /
+apply-but-keep-dynamic-resolution / restore.
 
 A [i].bak[/i] is written before the first change and never overwritten, so restore
-always returns you to stock. Steam Deck users: [i]python3 mgs4ecf.py --interactive[/i]
+always returns you to stock. Steam Deck / Linux / macOS: run
+[i]./run-mgs4-clarity-fix.sh[/i] instead — same script, standard-library Python,
+no PowerShell needed.
+
+[b]Low-end GPU and it still dips into the 20s?[/b] Do the opposite of this mod's
+default: keep dynamic resolution on and lower the ceiling it scales from —
+[i]-Apply -KeepDynamicRes -BufferWidth 1280 -BufferHeight 720[/i] (or
+[i]--apply --keep-dynamic-res --buffer-width 1280 --buffer-height 720[/i] on the
+Python side). The scaler is what keeps weak hardware playable; this mod's default
+turns it off on purpose because it assumes you have headroom to spend.
 
 [size=4][b]There is no .exe in this download[/b][/size]
 
@@ -73,11 +83,24 @@ Setting it to "match your native resolution" throws that away. It reads like a
 sharpening tweak and does the opposite — combined with FXAA off you land at native
 resolution with no anti-aliasing at all. This mod leaves it at 3840x2160.
 
+Editing it yourself? [i]windowSizeX/Y[/i] has to move with [i]bufferSizeX/Y[/i] —
+stock keeps them equal, and [i]windowSize[/i] is the actual swapchain the game
+presents through. Change one without the other and nothing visibly happens. The
+script now moves both together automatically.
+
 [size=4][b]What this will not fix[/b][/size]
 
 MGS4 is a 2008 PS3 game that rendered at 1024x768 internally, and the Master
 Collection is a port of that build rather than a remake. Some softness lives in the
 source assets and no config edit touches it. This sharpens what can be sharpened.
+
+[size=4][b]A plaintext alternative for basic settings[/b][/size]
+
+Credit to IKobi in the comments below: a plain-text [i]mgs4.user.ini[/i] dropped into
+[i]MGS4\config\[/i] overrides [i][render][/i] keys directly (confirmed against the
+binary — see the GitHub README for the full key list), no decrypt/re-encrypt needed.
+It does not cover [i]MaxAniso[/i] or [i]ShadowBufferSize[/i] — those still need this
+mod's [i].ecf[/i] editor.
 
 [size=4][b]For modders: the .ecf format[/b][/size]
 
@@ -135,10 +158,18 @@ INSTALL
 
 Unzip into your MGS4 folder - the one containing MGS4\ and mgs4_savedata_win\ - and
 double-click Run-MGS4-Clarity-Fix.bat. It prints your current settings, then offers
-apply / apply-but-keep-FXAA / restore.
+apply / apply-but-keep-FXAA / apply-but-keep-dynamic-resolution / restore.
 
 A .bak is written before the first change and never overwritten, so restore always
-returns you to stock. Steam Deck users: python3 mgs4ecf.py --interactive
+returns you to stock. Steam Deck / Linux / macOS: run ./run-mgs4-clarity-fix.sh
+instead - same script, standard-library Python, no PowerShell needed.
+
+Low-end GPU and it still dips into the 20s? Do the opposite of this mod's default:
+keep dynamic resolution on and lower the ceiling it scales from -
+-Apply -KeepDynamicRes -BufferWidth 1280 -BufferHeight 720 (or
+--apply --keep-dynamic-res --buffer-width 1280 --buffer-height 720 on the Python
+side). The scaler is what keeps weak hardware playable; this mod's default turns it
+off on purpose because it assumes you have headroom to spend.
 
 THERE IS NO .EXE IN THIS DOWNLOAD
 
@@ -157,11 +188,23 @@ Setting it to "match your native resolution" throws that away. It reads like a
 sharpening tweak and does the opposite - combined with FXAA off you land at native
 resolution with no anti-aliasing at all. This mod leaves it at 3840x2160.
 
+Editing it yourself? windowSizeX/Y has to move with bufferSizeX/Y - stock keeps them
+equal, and windowSize is the actual swapchain the game presents through. Change one
+without the other and nothing visibly happens. The script now moves both together
+automatically.
+
 WHAT THIS WILL NOT FIX
 
 MGS4 is a 2008 PS3 game that rendered at 1024x768 internally, and the Master Collection
 is a port of that build rather than a remake. Some softness lives in the source assets
 and no config edit touches it. This sharpens what can be sharpened.
+
+A PLAINTEXT ALTERNATIVE FOR BASIC SETTINGS
+
+Credit to IKobi in the comments below: a plain-text mgs4.user.ini dropped into
+MGS4\config\ overrides [render] keys directly (confirmed against the binary - see
+the GitHub README for the full key list), no decrypt/re-encrypt needed. It does not
+cover MaxAniso or ShadowBufferSize - those still need this mod's .ecf editor.
 
 FOR MODDERS: THE .ECF FORMAT
 
@@ -218,10 +261,13 @@ load-dependent, so the gap widens on weaker GPUs and during heavy scenes.
 
 ## Upload settings
 
-- **Mod version:** `1.0.0` to match the GitHub tag, rather than `1.0`
+- **Mod version:** `1.1.0` to match the GitHub tag, rather than `1.1` — bumped from
+  `1.0.0` for the `-KeepDynamicRes` flag, the `windowSize` sync fix, and the Linux
+  `.sh` launcher, all added in response to issues reported after the first release
 - **Requirements:** none
 - **Permissions:** MIT, so allow redistribution and modification
-- **Files:** upload `MGS4-Clarity-Fix-v1.0.0.zip` (12 KB) as the main file
+- **Files:** upload `MGS4-Clarity-Fix-v1.1.0.zip` as the main file, replacing
+  `MGS4-Clarity-Fix-v1.0.0.zip`
 - **Do not upload** `mgs4ecf.exe` — Nexus virus-scans uploads, and an opaque
   bundled-Python binary invites both false positives and user suspicion
 - Credit cipherxof for MGSFPSUnlock by link only; do not bundle it

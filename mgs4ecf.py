@@ -79,18 +79,25 @@ def cmd_show(cfg: Path) -> None:
 
 
 def cmd_apply(cfg: Path, saves: Path, width: int, height: int, aniso: int,
-              shadow: int, keep_fxaa: bool) -> None:
+              shadow: int, keep_fxaa: bool, keep_dynamic_res: bool = False) -> None:
     print('\nApplying...')
     main = cfg / 'mgs4.ecf'
     backup_once(main)
     t = read_ecf(main)
-    t = re.sub(r'(?m)^(\s*dynamicResolution\s*=\s*)\w+', r'\1false', t)
+    if not keep_dynamic_res:
+        t = re.sub(r'(?m)^(\s*dynamicResolution\s*=\s*)\w+', r'\1false', t)
     t = re.sub(r'(?m)^(\s*bufferSizeX\s*=\s*)\d+', rf'\g<1>{width}', t)
     t = re.sub(r'(?m)^(\s*bufferSizeY\s*=\s*)\d+', rf'\g<1>{height}', t)
+    # Stock always keeps windowSize equal to bufferSize (both 3840x2160). windowSize is
+    # the actual swapchain the game presents through, so changing bufferSize alone while
+    # it stays behind caps the output there and the change never reaches the screen.
+    t = re.sub(r'(?m)^(\s*windowSizeX\s*=\s*)\d+', rf'\g<1>{width}', t)
+    t = re.sub(r'(?m)^(\s*windowSizeY\s*=\s*)\d+', rf'\g<1>{height}', t)
     if not keep_fxaa:
         t = re.sub(r'(?m)^(\s*fxaa\s*=\s*)true', r'\1false', t)
     write_ecf(main, t)
-    print(f'  mgs4.ecf: dynamicResolution=false, buffer={width}x{height}'
+    dr = '(kept on)' if keep_dynamic_res else 'false'
+    print(f'  mgs4.ecf: dynamicResolution={dr}, buffer=window={width}x{height}'
           f'{"" if keep_fxaa else ", fxaa=false"}')
 
     scal = cfg / 'mgs4.scalability_PC.ecf'
@@ -139,7 +146,8 @@ def cmd_interactive(cfg: Path, saves: Path, width: int, height: int, aniso: int,
     cmd_show(cfg)
     print('  [1] Apply clarity settings (dynamic res off, FXAA off, 16x AF)')
     print('  [2] Apply, but keep FXAA on')
-    print('  [3] Restore stock settings')
+    print('  [3] Apply, but keep dynamic resolution on (weak/low-end GPUs)')
+    print('  [4] Restore stock settings')
     print('  [0] Exit\n')
     choice = input('Choose: ').strip()
     if choice == '1':
@@ -147,6 +155,8 @@ def cmd_interactive(cfg: Path, saves: Path, width: int, height: int, aniso: int,
     elif choice == '2':
         cmd_apply(cfg, saves, width, height, aniso, shadow, True)
     elif choice == '3':
+        cmd_apply(cfg, saves, width, height, aniso, shadow, False, keep_dynamic_res=True)
+    elif choice == '4':
         cmd_restore(cfg, saves)
     elif choice == '0':
         print('Nothing changed.')
@@ -171,6 +181,10 @@ def main() -> int:
     ap.add_argument('--shadow-buffer', type=int, default=4096,
                     choices=[512, 1024, 2048, 4096])
     ap.add_argument('--keep-fxaa', action='store_true')
+    # Leaves dynamicResolution untouched instead of forcing it off. For hardware that's
+    # missing frame budget even at a low target resolution, the scaler is the thing
+    # keeping the game playable, not the thing making it soft.
+    ap.add_argument('--keep-dynamic-res', action='store_true')
     args = ap.parse_args()
 
     for flag, ext in (('decrypt', '.txt'), ('encrypt', '.ecf')):
@@ -206,7 +220,8 @@ def main() -> int:
         cmd_restore(cfg, saves)
     elif args.apply:
         cmd_apply(cfg, saves, args.buffer_width, args.buffer_height,
-                  args.aniso, args.shadow_buffer, args.keep_fxaa)
+                  args.aniso, args.shadow_buffer, args.keep_fxaa,
+                  keep_dynamic_res=args.keep_dynamic_res)
     elif interactive:
         cmd_interactive(cfg, saves, args.buffer_width, args.buffer_height,
                         args.aniso, args.shadow_buffer)

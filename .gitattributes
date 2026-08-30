@@ -1,0 +1,6 @@
+# Keep POSIX line endings on the shell launcher no matter what platform commits/checks
+# it out on -- a CRLF shebang line fails to exec on Linux/macOS/Steam Deck.
+*.sh text eol=lf
+*.bat text eol=crlf
+*.png binary
+*.zip binary

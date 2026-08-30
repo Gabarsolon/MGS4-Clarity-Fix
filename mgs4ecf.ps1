@@ -7,7 +7,10 @@
     rolling-index XOR. This script converts them to editable text and back, so you
     can change engine settings in Notepad.
 
-    -Apply makes the three changes documented in the README.
+    -Apply makes the three changes documented in the README. -KeepDynamicRes leaves the
+    frame-budget scaler on, for hardware that needs it more than it needs a fixed
+    resolution. -BufferWidth/-BufferHeight now move windowSize in lockstep, since that's
+    the pairing stock ships and the one that's confirmed to reach the screen.
 
     Tested on Windows PowerShell 5.1 and PowerShell 7.6.5.
 
@@ -31,12 +34,18 @@ param(
     [string]$Out,
     [string]$GameDir,
     # Internal render target. Leave at 3840x2160 unless you know why you're changing it -
-    # this is a render resolution, not a display resolution. See the README.
+    # this is a render resolution, not a display resolution. See the README. Stock always
+    # keeps windowSizeX/Y equal to this, and -Apply now does the same: raise or lower it
+    # and the window/swapchain size follows, which is what actually makes the change visible.
     [int]$BufferWidth  = 3840,
     [int]$BufferHeight = 2160,
     [ValidateSet(1, 2, 4, 8, 16)][int]$Aniso = 16,
     [ValidateSet(512, 1024, 2048, 4096)][int]$ShadowBuffer = 4096,
-    [switch]$KeepFxaa
+    [switch]$KeepFxaa,
+    # Leaves dynamicResolution untouched instead of forcing it off. For hardware that's
+    # missing frame budget even at a low target resolution, the scaler is the thing
+    # keeping the game playable, not the thing making it soft. See the README.
+    [switch]$KeepDynamicRes
 )
 
 $ErrorActionPreference = 'Stop'
@@ -136,18 +145,26 @@ function Invoke-Restore {
 }
 
 function Invoke-Apply {
-    param([string]$Cfg, [string]$SaveRoot, [int]$W, [int]$H, [int]$An, [int]$Sh, [bool]$Keep)
+    param([string]$Cfg, [string]$SaveRoot, [int]$W, [int]$H, [int]$An, [int]$Sh, [bool]$Keep, [bool]$KeepDyn)
     Write-Host "`nApplying..." -ForegroundColor Cyan
     $main = Join-Path $Cfg 'mgs4.ecf'
     Backup-Once $main
     $t = Read-Ecf $main
-    $t = [regex]::Replace($t, '(?m)^(\s*dynamicResolution\s*=\s*)\w+', '${1}false')
+    if (-not $KeepDyn) { $t = [regex]::Replace($t, '(?m)^(\s*dynamicResolution\s*=\s*)\w+', '${1}false') }
     $t = [regex]::Replace($t, '(?m)^(\s*bufferSizeX\s*=\s*)\d+', "`${1}$W")
     $t = [regex]::Replace($t, '(?m)^(\s*bufferSizeY\s*=\s*)\d+', "`${1}$H")
+    # Stock always keeps windowSize equal to bufferSize (both 3840x2160). windowSize is the
+    # actual swapchain the game presents through, so changing bufferSize alone while it
+    # stays behind caps the output there and the change never reaches the screen. Keeping
+    # them in lockstep is what makes -BufferWidth/-Height actually work in either direction,
+    # and it's the one config pairing we've confirmed the game ships with.
+    $t = [regex]::Replace($t, '(?m)^(\s*windowSizeX\s*=\s*)\d+', "`${1}$W")
+    $t = [regex]::Replace($t, '(?m)^(\s*windowSizeY\s*=\s*)\d+', "`${1}$H")
     if (-not $Keep) { $t = [regex]::Replace($t, '(?m)^(\s*fxaa\s*=\s*)true', '${1}false') }
     Write-Ecf $main $t
     $fx = if ($Keep) { '' } else { ', fxaa=false' }
-    Write-Host "  mgs4.ecf: dynamicResolution=false, buffer=${W}x${H}$fx" -ForegroundColor Green
+    $dr = if ($KeepDyn) { '(kept on)' } else { 'false' }
+    Write-Host "  mgs4.ecf: dynamicResolution=$dr, buffer=window=${W}x${H}$fx" -ForegroundColor Green
 
     $scal = Join-Path $Cfg 'mgs4.scalability_PC.ecf'
     if (Test-Path -LiteralPath $scal) {
@@ -207,18 +224,20 @@ Write-Host "config: $cfg" -ForegroundColor DarkGray
 switch ($PSCmdlet.ParameterSetName) {
     'Show'    { Show-Settings $cfg $saveRoot }
     'Restore' { Invoke-Restore $cfg $saveRoot }
-    'Apply'   { Invoke-Apply $cfg $saveRoot $BufferWidth $BufferHeight $Aniso $ShadowBuffer $KeepFxaa.IsPresent }
+    'Apply'   { Invoke-Apply $cfg $saveRoot $BufferWidth $BufferHeight $Aniso $ShadowBuffer $KeepFxaa.IsPresent $KeepDynamicRes.IsPresent }
     'Interactive' {
         Show-Settings $cfg $saveRoot
         Write-Host '  [1] Apply clarity settings (dynamic res off, FXAA off, 16x AF)'
         Write-Host '  [2] Apply, but keep FXAA on'
-        Write-Host '  [3] Restore stock settings'
+        Write-Host '  [3] Apply, but keep dynamic resolution on (weak/low-end GPUs)'
+        Write-Host '  [4] Restore stock settings'
         Write-Host '  [0] Exit'
         Write-Host ''
         switch ((Read-Host 'Choose')) {
-            '1' { Invoke-Apply $cfg $saveRoot $BufferWidth $BufferHeight $Aniso $ShadowBuffer $false }
-            '2' { Invoke-Apply $cfg $saveRoot $BufferWidth $BufferHeight $Aniso $ShadowBuffer $true }
-            '3' { Invoke-Restore $cfg $saveRoot }
+            '1' { Invoke-Apply $cfg $saveRoot $BufferWidth $BufferHeight $Aniso $ShadowBuffer $false $false }
+            '2' { Invoke-Apply $cfg $saveRoot $BufferWidth $BufferHeight $Aniso $ShadowBuffer $true  $false }
+            '3' { Invoke-Apply $cfg $saveRoot $BufferWidth $BufferHeight $Aniso $ShadowBuffer $false $true }
+            '4' { Invoke-Restore $cfg $saveRoot }
             '0' { Write-Host 'Nothing changed.' }
             default { Write-Host 'Not an option. Nothing changed.' -ForegroundColor Yellow }
         }
